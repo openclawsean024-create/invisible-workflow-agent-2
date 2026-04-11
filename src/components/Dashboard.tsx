@@ -25,23 +25,14 @@ export default function Dashboard() {
     fetch('/api/dashboard/stats')
       .then((r) => r.ok ? r.json() : null)
       .then((d) => d && setStats(d))
-      .catch(() => {});
+      .catch(() => {})
   }, []);
 
   useEffect(() => {
     fetch('/api/executions?limit=6')
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => d?.executions && setLogs(d.executions.map((e: { id: string; rule: { name: string }; status: string; startedAt: string; details?: string }) => ({
-        id: e.id,
-        ruleId: e.rule?.name ?? 'Rule',
-        ruleName: e.rule?.name ?? 'Rule',
-        action: e.details ?? '',
-        status: e.status as 'success' | 'failed' | 'running',
-        timestamp: e.startedAt,
-        details: e.details ?? '',
-        tool: 'System',
-      })))
-      .catch(() => {});
+      .then((d) => { if (d?.executions) setLogs(d.executions.map((e: { id: string; rule: { name: string }; status: string; startedAt: string; details?: string }) => ({ id: e.id, ruleId: e.rule?.name ?? 'Rule', ruleName: e.rule?.name ?? 'Rule', action: e.details ?? '', status: e.status as 'success' | 'failed' | 'running', timestamp: e.startedAt, details: e.details ?? '', tool: 'System' }))) })
+      .catch(() => {})
   }, []);
 
   useEffect(() => {

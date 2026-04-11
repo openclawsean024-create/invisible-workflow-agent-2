@@ -3,8 +3,9 @@
 
 import { proxyActivities } from '@temporalio/workflow';
 import type * as activities from '@/activities';
+import { automationWorkflow } from '@/workflows/automation';
 
-const { findDueRules, automationWorkflow } = proxyActivities<typeof activities>({
+const { findDueRules } = proxyActivities<typeof activities>({
   startToCloseTimeout: '5 minutes',
 });
 
@@ -18,7 +19,7 @@ export async function scheduledWorkflow(): Promise<{ executed: number; results: 
   }
 
   // Execute each rule in parallel
-  const promises = dueRules.map(async (rule) => {
+  const promises = dueRules.map(async (rule: { id: string; name: string }) => {
     try {
       const result = await automationWorkflow({
         ruleId: rule.id,

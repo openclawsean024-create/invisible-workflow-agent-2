@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/prisma';
+import { ToolConnection } from '@prisma/client';
 
 // GET /api/tools - List all tools with connection status
 export async function GET(req: NextRequest) {
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
   ];
 
   const result = tools.map((tool) => {
-    const conn = connections.find((c) => c.toolId === tool.id);
+    const conn = connections.find((c: ToolConnection) => c.toolId === tool.id);
     return {
       ...tool,
       connected: conn?.connected ?? false,

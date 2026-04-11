@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/prisma';
+import { Rule, ToolConnection, Execution } from '@prisma/client';
 
 // GET /api/dashboard/stats - Dashboard statistics
 export async function GET(req: NextRequest) {
@@ -28,23 +29,23 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  const activeRules = rules.filter((r) => r.enabled).length;
-  const connectedTools = toolConnections.filter((t) => t.connected).length;
+  const activeRules = rules.filter((r: Rule) => r.enabled).length;
+  const connectedTools = toolConnections.filter((t: ToolConnection) => t.connected).length;
 
-  const successCount = totalExecutions.filter((e) => e.status === 'success').length;
-  const failedCount = totalExecutions.filter((e) => e.status === 'failed').length;
+  const successCount = totalExecutions.filter((e: Execution) => e.status === 'success').length;
+  const failedCount = totalExecutions.filter((e: Execution) => e.status === 'failed').length;
   const totalCount = totalExecutions.length;
   const successRate = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 100;
 
   // Weekly executions for chart
-  const weeklyStats = recentExecutions.reverse().map((e) => ({
+  const weeklyStats = recentExecutions.reverse().map((e: Execution) => ({
     date: e.startedAt.toISOString().split('T')[0],
     success: e.status === 'success' ? 1 : 0,
     failed: e.status === 'failed' ? 1 : 0,
   }));
 
   // Estimated time saved (rough estimate: 5 min per execution)
-  const estimatedMinutesSaved = totalExecutions.filter((e) => e.status === 'success').length * 5;
+  const estimatedMinutesSaved = totalExecutions.filter((e: Execution) => e.status === 'success').length * 5;
 
   return NextResponse.json({
     activeRules,
