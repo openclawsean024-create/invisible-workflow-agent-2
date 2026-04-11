@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/prisma';
-import { Connection } from '@temporalio/client';
+import { executeRule } from '@/lib/workflow-executor';
 
 // POST /api/executions/[executionId]/retry - Retry a failed execution
 export async function POST(
@@ -28,7 +28,6 @@ export async function POST(
     return NextResponse.json({ error: 'Only failed executions can be retried' }, { status: 400 });
   }
 
-  // Create new execution for retry
   const newExecution = await prisma.execution.create({
     data: {
       ruleId: execution.ruleId,
@@ -37,26 +36,11 @@ export async function POST(
     },
   });
 
-  // Try to signal Temporal workflow if available
-  const temporalHost = process.env.TEMPORAL_HOST;
-  if (temporalHost) {
-    try {
-      const connection = await Connection.connect({ address: temporalHost });
-      const temporal = new (await import('@temporalio/client')).Client({ connection });
-      await temporal.workflow.signalWithStart('automationWorkflow', {
-        args: [execution.ruleId, newExecution.id],
-        taskQueue: 'invisible-workflow',
-        workflowId: `retry-${newExecution.id}`,
-        signal: 'retry',
-        signalArgs: [execution.ruleId, newExecution.id],
-      });
-    } catch (err) {
-      console.error('Temporal retry error:', err);
-    }
-  }
+  const result = await executeRule(execution.ruleId, newExecution.id);
 
   return NextResponse.json({
     execution: newExecution,
-    message: 'Retry initiated',
+    result,
+    message: 'Retry completed',
   });
 }

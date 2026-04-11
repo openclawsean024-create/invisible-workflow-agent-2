@@ -13,5 +13,11 @@
         }
       ]
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/scheduled",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }
