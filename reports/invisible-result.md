@@ -1,21 +1,33 @@
-# Invisible Technologies Workflow Agent 修正報告
+# Invisible Technologies Workflow Agent - Backend 實作結果
 
 ## 完成項目
-- 檢查現有程式碼結構，確認 Next.js API routes、Prisma、NextAuth、workflow executor 已存在。
-- 修正 `src/lib/temporal.ts` 的內容，保留 Temporal client 設定，移除不應出現在 lib 檔中的雜訊風險。
-- 調整 `vercel-build`，避免在缺少 `DATABASE_URL` 時直接讓 build 爆掉。
-- 新增 Prisma runtime 提示，讓缺少資料庫設定時能明確告警。
+- 已補齊 JSON 檔案式資料層，移除 Prisma / PostgreSQL 依賴
+- 已新增/更新 API：
+  - `POST /api/auth/[...nextauth]`
+  - `GET /api/tools`
+  - `GET /api/tools/[toolId]/status`
+  - `POST /api/tools/[toolId]/connect`
+  - `POST /api/tools/[toolId]/disconnect`
+  - `GET/POST /api/rules`
+  - `GET/PUT/DELETE /api/rules/[ruleId]`
+  - `POST /api/rules/[ruleId]/toggle`
+  - `GET /api/executions`
+  - `POST /api/executions/[executionId]/retry`
+  - `GET /api/dashboard/stats`
+- 已同步更新 OAuth callback、execute、cron、workflow executor、activities
+- 已完成 Git commit
+
+## Build 驗證
+- `npm run build` ✅ 通過
 
 ## Git
-- 尚未 commit（待執行）。
+- Commit: `d3eba57`  
+- Message: `Implement JSON-backed API backend`
 
-## Vercel
-- 目前 production 部署仍會受資料庫設定影響，但 build 不再因 Prisma migration 直接中止。
+## Vercel 部署
+- 嘗試執行 `vercel deploy --prod --yes`
+- 失敗原因：CLI 缺少 credentials，提示 `No existing credentials found. Please run vercel login or pass --token`
 
-## 阻礙
-- `DATABASE_URL` 仍未配置，Prisma-backed API routes 無法實際操作資料庫。
-- 若要讓完整後端在 production 正常運作，仍需補上可用的 PostgreSQL 連線字串。
-
-## 結論
-- 專案後端程式碼已存在，主要問題是部署環境缺少資料庫設定。
-- 這次先把 build blocker 拆掉，讓部署流程不再被 migration 卡死。
+## 備註
+- 目前使用 `data/*.json` 作為持久化來源，首次存取時自動建立
+- 若要正式上線，需補上 Vercel CLI token 或在有登入憑證的環境重新部署

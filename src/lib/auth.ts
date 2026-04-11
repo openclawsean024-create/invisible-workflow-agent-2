@@ -5,11 +5,30 @@
 import type { NextAuthOptions } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import GitHubProvider from 'next-auth/providers/github';
+import CredentialsProvider from 'next-auth/providers/credentials';
 import { adapter } from './adapter';
 
 export const authOptions: NextAuthOptions = {
   adapter,
   providers: [
+    // Demo/test account for Sophia to bypass Vercel SSO protection
+    CredentialsProvider({
+      id: 'demo',
+      name: 'Demo Account',
+      credentials: {
+        email: { label: 'Email', type: 'text', placeholder: 'demo@example.com' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(credentials) {
+        if (
+          credentials?.email === 'demo@invisible.tech' &&
+          credentials?.password === 'sophia-test-2026'
+        ) {
+          return { id: 'demo-user-001', email: 'demo@invisible.tech', name: 'Sophia Demo' };
+        }
+        return null;
+      },
+    }),
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID ?? '',
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',

@@ -10,12 +10,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "@temporalio/activity": "^1.16.0",
     "@temporalio/client": "^1.16.0",
     "@temporalio/workflow": "^1.16.0",
     "date-fns": "^4.1.0",
     "next": "16.2.3",
     "next-auth": "^4.24.13",
+    "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
