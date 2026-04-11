@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  toolConnections ToolConnection[]
+  rules         Rule[]
+  executions    Execution[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
+model ToolConnection {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  toolId       String    // 'gmail' | 'google-calendar' | 'slack' | 'notion' | 'trello' | 'github'
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  accountId    String?
+  accountName  String?
+  connected    Boolean   @default(false)
+  connectedAt  DateTime?
+  lastSyncAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  @@unique([userId, toolId])
+}
+
+model Rule {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  trigger      String      // 'meeting_ended' | 'email_received' | 'scheduled' | 'github_pr' | 'notion_updated' | 'trello_card_moved'
+  condition    String      // JSON string
+  action       String      // JSON string
+  schedule     String?     // cron expression
+  enabled      Boolean     @default(true)
+  lastRunAt    DateTime?
+  runCount     Int         @default(0)
+  successCount Int         @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  executions   Execution[]
+  @@index([userId])
+}
+
+model Execution {
+  id          String    @id @default(cuid())
+  ruleId      String
+  rule        Rule      @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      String    // 'success' | 'failed' | 'running'
+  details     String?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  workflowId  String?   // Temporal workflow ID
+  @@index([ruleId])
+  @@index([userId])
+}

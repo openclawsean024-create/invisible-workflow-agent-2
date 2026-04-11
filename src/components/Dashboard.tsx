@@ -2,36 +2,77 @@
 
 import { useState, useEffect } from 'react';
 import { useApp } from '@/app/page';
-import { SAMPLE_RULES, SAMPLE_LOGS, TOOLS } from '@/lib/types';
+import { SAMPLE_LOGS, TOOLS } from '@/lib/types';
+
+interface DashboardStats {
+  activeRules: number;
+  connectedTools: number;
+  totalTools: number;
+  successRate: number;
+  totalExecutions: number;
+  successCount: number;
+  failedCount: number;
+  weeklyStats: Array<{ date: string; success: number; failed: number }>;
+  estimatedMinutesSaved: number;
+}
 
 export default function Dashboard() {
   const { lang } = useApp();
   const [logs, setLogs] = useState(SAMPLE_LOGS);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
 
-  // Simulate live log stream
+  useEffect(() => {
+    fetch('/api/dashboard/stats')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => d && setStats(d))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/executions?limit=6')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => d?.executions && setLogs(d.executions.map((e: { id: string; rule: { name: string }; status: string; startedAt: string; details?: string }) => ({
+        id: e.id,
+        ruleId: e.rule?.name ?? 'Rule',
+        ruleName: e.rule?.name ?? 'Rule',
+        action: e.details ?? '',
+        status: e.status as 'success' | 'failed' | 'running',
+        timestamp: e.startedAt,
+        details: e.details ?? '',
+        tool: 'System',
+      })))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     const interval = setInterval(() => {
       const newLog = {
         id: `log-${Date.now()}`,
         ruleId: '1',
-        ruleName: lang === 'zh' ? '會議摘要發送到 Slack' : 'Meeting Summary to Slack',
-        action: lang === 'zh' ? '傳送會議摘要到 #general 頻道' : 'Send meeting summary to #general channel',
-        status: Math.random() > 0.1 ? 'success' as const : 'running' as const,
+        ruleName: lang === 'zh' ? '系統監控中' : 'System Monitoring',
+        action: lang === 'zh' ? 'Agent 正在監控工作流程...' : 'Agent monitoring workflow...',
+        status: 'running' as const,
         timestamp: new Date().toISOString(),
-        details: lang === 'zh' ? 'Agent 正在監控工作流程...' : 'Agent monitoring workflow...',
-        tool: 'Slack',
+        details: lang === 'zh' ? '等待觸發事件...' : 'Waiting for trigger events...',
+        tool: 'System',
       };
       setLogs((prev) => [newLog, ...prev.slice(0, 9)]);
     }, 8000);
     return () => clearInterval(interval);
   }, [lang]);
 
-  const successRate = Math.round((SAMPLE_RULES.reduce((a, r) => a + r.successCount, 0) / SAMPLE_RULES.reduce((a, r) => a + r.runCount, 0)) * 100);
-  const connectedTools = TOOLS.filter((t) => t.connected).length;
+  const activeRules = stats?.activeRules ?? 2;
+  const connectedTools = stats?.connectedTools ?? 0;
+  const successRate = stats?.successRate ?? 95;
+  const savedMinutes = stats?.estimatedMinutesSaved ?? 180;
+
+  const formatSaved = (mins: number) => {
+    if (mins >= 60) return `${Math.floor(mins / 60)}h`;
+    return `${mins}m`;
+  };
 
   return (
     <div className="space-y-6">
-      {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-white">
           {lang === 'zh' ? '儀表板' : 'Dashboard'}
@@ -41,13 +82,12 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: lang === 'zh' ? '活躍規則' : 'Active Rules', value: SAMPLE_RULES.filter((r) => r.enabled).length, icon: '⚙️', color: 'text-indigo-400', bg: 'bg-indigo-900/30' },
-          { label: lang === 'zh' ? '已串接工具' : 'Connected Tools', value: `${connectedTools}/${TOOLS.length}`, icon: '🔗', color: 'text-green-400', bg: 'bg-green-900/30' },
+          { label: lang === 'zh' ? '活躍規則' : 'Active Rules', value: activeRules, icon: '⚙️', color: 'text-indigo-400', bg: 'bg-indigo-900/30' },
+          { label: lang === 'zh' ? '已串接工具' : 'Connected Tools', value: `${connectedTools}/6`, icon: '🔗', color: 'text-green-400', bg: 'bg-green-900/30' },
           { label: lang === 'zh' ? '執行成功率' : 'Success Rate', value: `${successRate}%`, icon: '✅', color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
-          { label: lang === 'zh' ? '節省時間/週' : 'Saved/Week', value: '3h', icon: '⏱️', color: 'text-yellow-400', bg: 'bg-yellow-900/30' },
+          { label: lang === 'zh' ? '節省時間/週' : 'Saved/Week', value: formatSaved(savedMinutes), icon: '⏱️', color: 'text-yellow-400', bg: 'bg-yellow-900/30' },
         ].map((card) => (
           <div key={card.label} className={`${card.bg} border border-gray-800 rounded-xl p-5`}>
             <div className="flex items-center justify-between mb-3">
@@ -59,7 +99,6 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Recent Logs Live Feed */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
           <div className="flex items-center gap-2">
@@ -91,30 +130,25 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Rules Summary */}
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-white mb-4">
             {lang === 'zh' ? '規則概覽' : 'Rules Overview'}
           </h3>
           <div className="space-y-3">
-            {SAMPLE_RULES.map((rule) => (
-              <div key={rule.id} className="flex items-center justify-between">
+            {TOOLS.slice(0, 3).map((tool) => (
+              <div key={tool.id} className="flex items-center justify-between">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${rule.enabled ? 'bg-green-400' : 'bg-gray-600'}`} />
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${stats ? 'bg-green-400' : 'bg-gray-600'}`} />
                   <span className="text-sm text-gray-300 truncate">
-                    {lang === 'zh' ? rule.nameZh : rule.name}
+                    {stats ? `${activeRules} ${lang === 'zh' ? '條活躍規則' : 'active rules'}` : '—'}
                   </span>
-                </div>
-                <div className="text-xs text-gray-500 flex-shrink-0 ml-3">
-                  {rule.runCount} {lang === 'zh' ? '次執行' : 'runs'}
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Tools Summary */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-white mb-4">
             {lang === 'zh' ? '工具串接' : 'Tool Integrations'}
@@ -125,6 +159,9 @@ export default function Dashboard() {
                 <span className="text-xl">{tool.icon}</span>
                 <span className="text-xs text-gray-400 truncate w-full text-center">
                   {lang === 'zh' ? tool.nameZh : tool.name}
+                </span>
+                <span className={`text-xs ${stats && tool.id === 'gmail' && stats.connectedTools > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+                  {tool.id === 'gmail' && connectedTools > 0 ? '✓' : '○'}
                 </span>
               </div>
             ))}

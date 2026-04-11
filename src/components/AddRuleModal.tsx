@@ -8,38 +8,88 @@ interface AddRuleModalProps {
   onClose: () => void;
 }
 
+interface ParsedRule {
+  trigger: string;
+  condition: string;
+  action: string;
+  name: string;
+}
+
 export default function AddRuleModal({ onClose }: AddRuleModalProps) {
   const { lang } = useApp();
   const [step, setStep] = useState(1);
   const [naturalRule, setNaturalRule] = useState('');
   const [loading, setLoading] = useState(false);
-  const [parsed, setParsed] = useState<{ trigger: string; condition: string; action: string } | null>(null);
+  const [parsed, setParsed] = useState<ParsedRule | null>(null);
+  const [error, setError] = useState('');
 
   const handleParse = async () => {
     if (!naturalRule.trim()) return;
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 2000));
-    // Simulate LLM parsing
-    setParsed({
-      trigger: 'meeting_ended',
-      condition: naturalRule,
-      action: naturalRule,
-    });
+    setError('');
+
+    try {
+      const res = await fetch('/api/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: naturalRule.slice(0, 50),
+          trigger: 'scheduled',
+          condition: JSON.stringify({ text: naturalRule }),
+          action: JSON.stringify({ text: naturalRule }),
+          schedule: '0 9 * * *',
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setParsed({
+          trigger: 'scheduled',
+          condition: naturalRule,
+          action: naturalRule,
+          name: naturalRule.slice(0, 50),
+        });
+        setStep(2);
+      } else {
+        setError(lang === 'zh' ? '建立規則失敗，請重試' : 'Failed to create rule, please retry');
+      }
+    } catch {
+      setError(lang === 'zh' ? '網路錯誤' : 'Network error');
+    }
     setLoading(false);
-    setStep(2);
   };
 
   const handleCreate = async () => {
+    if (!parsed) return;
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    setLoading(false);
-    onClose();
+    try {
+      const res = await fetch('/api/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: parsed.name,
+          trigger: parsed.trigger,
+          condition: JSON.stringify({ text: parsed.condition }),
+          action: JSON.stringify({ text: parsed.action }),
+        }),
+      });
+
+      if (!res.ok) {
+        setError(lang === 'zh' ? '建立規則失敗' : 'Failed to create rule');
+        setLoading(false);
+        return;
+      }
+      onClose();
+      window.location.reload();
+    } catch {
+      setError(lang === 'zh' ? '網路錯誤' : 'Network error');
+      setLoading(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg mx-4 shadow-2xl">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <div>
             <h3 className="text-base font-semibold text-white">
@@ -59,7 +109,6 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
           </button>
         </div>
 
-        {/* Step indicator */}
         <div className="flex gap-1 px-6 pt-4">
           {[1, 2].map((s) => (
             <div
@@ -71,10 +120,14 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
           ))}
         </div>
 
-        {/* Content */}
         <div className="p-6">
           {step === 1 ? (
             <>
+              {error && (
+                <div className="mb-4 px-4 py-3 rounded-lg bg-red-900/30 border border-red-800 text-xs text-red-400">
+                  {error}
+                </div>
+              )}
               <div className="mb-4">
                 <label className="block text-xs text-gray-400 mb-2">
                   {lang === 'zh' ? '用自然語言描述你的規則' : 'Describe your rule in natural language'}
@@ -91,7 +144,6 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
                 />
               </div>
 
-              {/* Example triggers */}
               <div className="mb-4">
                 <div className="text-xs text-gray-500 mb-2">
                   {lang === 'zh' ? '或選擇觸發條件：' : 'Or choose a trigger:'}
@@ -124,12 +176,12 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
                 {loading ? (
                   <>
                     <span className="animate-spin">⟳</span>
-                    {lang === 'zh' ? 'AI 解析中...' : 'AI parsing...'}
+                    {lang === 'zh' ? '建立規則中...' : 'Creating rule...'}
                   </>
                 ) : (
                   <>
                     <span>⚡</span>
-                    {lang === 'zh' ? '解析規則' : 'Parse Rule'}
+                    {lang === 'zh' ? '建立規則' : 'Create Rule'}
                   </>
                 )}
               </button>
@@ -139,17 +191,19 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
               <div className="space-y-3 mb-5">
                 <div className="bg-gray-800/50 rounded-xl p-4">
                   <div className="text-xs text-indigo-400 font-medium mb-1">IF</div>
-                  <div className="text-sm text-gray-200">
-                    {parsed?.condition}
-                  </div>
+                  <div className="text-sm text-gray-200">{parsed?.condition}</div>
                 </div>
                 <div className="bg-gray-800/50 rounded-xl p-4">
                   <div className="text-xs text-emerald-400 font-medium mb-1">THEN</div>
-                  <div className="text-sm text-gray-200">
-                    {parsed?.action}
-                  </div>
+                  <div className="text-sm text-gray-200">{parsed?.action}</div>
                 </div>
               </div>
+
+              {error && (
+                <div className="mb-4 px-4 py-3 rounded-lg bg-red-900/30 border border-red-800 text-xs text-red-400">
+                  {error}
+                </div>
+              )}
 
               <div className="flex gap-3">
                 <button
