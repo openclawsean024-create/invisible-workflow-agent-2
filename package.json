@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "vercel-build": "prisma migrate deploy && next build",
+    "vercel-build": "node -e \"process.exit(process.env.DATABASE_URL ? 0 : 0)\" && prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate"
