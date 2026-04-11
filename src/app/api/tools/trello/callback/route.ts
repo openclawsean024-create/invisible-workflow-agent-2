@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { prisma } from '@/lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { storage } from '@/lib/storage';
 
 // OAuth callback for Trello
 export async function GET(req: NextRequest) {
@@ -19,39 +19,20 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Get access token from Trello
-    const tokenRes = await fetch('https://trello.com/1/token', {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    // Trello uses token directly from the authorization page
     const token = code;
-
-    // Get Trello member info
     const memberRes = await fetch(`https://api.trello.com/1/members/me?key=${process.env.TRELLO_API_KEY}&token=${token}`);
     const member = await memberRes.json();
 
-    await prisma.toolConnection.upsert({
-      where: {
-        userId_toolId: { userId: session.user.id ?? '', toolId: 'trello' },
-      },
-      create: {
-        userId: session.user.id ?? '',
-        toolId: 'trello',
-        accessToken: token,
-        accountId: member.id,
-        accountName: member.fullName ?? member.username ?? 'Trello User',
-        connected: true,
-        connectedAt: new Date(),
-      },
-      update: {
-        accessToken: token,
-        accountId: member.id,
-        accountName: member.fullName ?? member.username ?? 'Trello User',
-        connected: true,
-        connectedAt: new Date(),
-      },
+    const userId = (session.user as { id?: string }).id ?? session.user.email;
+    const now = new Date().toISOString();
+
+    await storage.upsertToolConnection(userId, 'trello', {
+      accessToken: token,
+      accountId: member.id,
+      accountName: member.fullName ?? member.username ?? 'Trello User',
+      connected: true,
+      connectedAt: now,
+      lastSyncAt: now,
     });
 
     return NextResponse.redirect(new URL('/?connected=trello', req.url));

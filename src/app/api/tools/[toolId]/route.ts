@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { prisma } from '@/lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { storage } from '@/lib/storage';
 
-// GET /api/tools/[toolId]/status
+// GET /api/tools/[toolId] - Get tool connection status
+// POST /api/tools/[toolId] - Generic tool action (used by callbacks)
+// DELETE /api/tools/[toolId] - Generic tool disconnect
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ toolId: string }> }
@@ -14,19 +16,21 @@ export async function GET(
   }
 
   const { toolId } = await params;
-  const connection = await prisma.toolConnection.findUnique({
-    where: { userId_toolId: { userId: session.user.id ?? '', toolId } },
-  });
+  const user = await storage.getUserByEmail(session.user.email);
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  const connection = await storage.getToolConnection(user.id, toolId);
 
   return NextResponse.json({
     connected: connection?.connected ?? false,
     account: connection?.accountName ?? null,
-    connectedAt: connection?.connectedAt?.toISOString() ?? null,
-    lastSync: connection?.lastSyncAt?.toISOString() ?? null,
+    connectedAt: connection?.connectedAt ?? null,
+    lastSync: connection?.lastSyncAt ?? null,
   });
 }
 
-// POST /api/tools/[toolId]/connect - Start OAuth flow
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ toolId: string }> }
@@ -37,25 +41,29 @@ export async function POST(
   }
 
   const { toolId } = await params;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
-
-  const oauthUrls: Record<string, string> = {
-    'google-calendar': `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${appUrl}/api/tools/google-calendar/callback&response_type=code&scope=https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly&access_type=offline&prompt=consent`,
-    slack: `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&scope=chat:write,channels:read,groups:read,im:read,im:write,mpim:write&redirect_uri=${appUrl}/api/tools/slack/callback&user_scope=identity.basic,identity.email`,
-    notion: `https://api.notion.com/v1/oauth/authorize?client_id=${process.env.NOTION_CLIENT_ID}&response_type=code&owner=user&redirect_uri=${appUrl}/api/tools/notion/callback`,
-    trello: `https://trello.com/1/authorize?expiration=never&name=InvisibleWorkflow&scope=read,write&response_type=code&key=${process.env.TRELLO_API_KEY}&redirect_uri=${appUrl}/api/tools/trello/callback`,
-    github: `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&scope=repo,read:user&redirect_uri=${appUrl}/api/tools/github/callback`,
-  };
-
-  const url = oauthUrls[toolId];
-  if (!url) {
-    return NextResponse.json({ error: 'Unknown tool' }, { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  const user = await storage.getUserByEmail(session.user.email);
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ authUrl: url });
+  // Used by OAuth callbacks to save connection data
+  if (body.action === 'saveConnection') {
+    const updated = await storage.upsertToolConnection(user.id, toolId, {
+      connected: body.connected ?? true,
+      connectedAt: body.connectedAt ? new Date(body.connectedAt).toISOString() : new Date().toISOString(),
+      lastSyncAt: body.lastSyncAt ? new Date(body.lastSyncAt).toISOString() : new Date().toISOString(),
+      accountName: body.accountName,
+      accessToken: body.accessToken,
+      refreshToken: body.refreshToken,
+      accountId: body.accountId,
+    });
+    return NextResponse.json({ connection: updated });
+  }
+
+  return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
 }
 
-// DELETE /api/tools/[toolId]/connect - Disconnect tool
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ toolId: string }> }
@@ -66,9 +74,11 @@ export async function DELETE(
   }
 
   const { toolId } = await params;
-  await prisma.toolConnection.deleteMany({
-    where: { user: { email: session.user.email }, toolId },
-  });
+  const user = await storage.getUserByEmail(session.user.email);
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
 
+  await storage.deleteToolConnection(user.id, toolId);
   return NextResponse.json({ success: true });
 }

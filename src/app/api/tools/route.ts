@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { prisma } from '@/lib/prisma';
-import { ToolConnection } from '@prisma/client';
+import { authOptions } from '@/lib/auth';
+import { storage } from '@/lib/storage';
 
 // GET /api/tools - List all tools with connection status
 export async function GET(req: NextRequest) {
@@ -12,9 +11,12 @@ export async function GET(req: NextRequest) {
   }
 
   const userEmail = session.user.email;
-  const connections = await prisma.toolConnection.findMany({
-    where: { user: { email: userEmail } },
-  });
+  const user = await storage.getUserByEmail(userEmail);
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  const connections = await storage.getToolConnectionsByUserId(user.id);
 
   const tools = [
     { id: 'gmail', name: 'Gmail', nameZh: 'Gmail', icon: '📧', description: 'Email client for sending and receiving emails', descriptionZh: '電子郵件客戶端，用於發送和接收郵件' },
@@ -26,13 +28,13 @@ export async function GET(req: NextRequest) {
   ];
 
   const result = tools.map((tool) => {
-    const conn = connections.find((c: ToolConnection) => c.toolId === tool.id);
+    const conn = connections.find(c => c.toolId === tool.id);
     return {
       ...tool,
       connected: conn?.connected ?? false,
       account: conn?.accountName ?? null,
-      connectedAt: conn?.connectedAt?.toISOString() ?? null,
-      lastSync: conn?.lastSyncAt?.toISOString() ?? null,
+      connectedAt: conn?.connectedAt ?? null,
+      lastSync: conn?.lastSyncAt ?? null,
     };
   });
 

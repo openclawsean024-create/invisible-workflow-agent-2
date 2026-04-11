@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { prisma } from '@/lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { storage } from '@/lib/storage';
 
-// GET /api/rules/[ruleId] - Get a single rule
+// GET /api/rules/[ruleId] - Get a single rule with recent executions
 // PUT /api/rules/[ruleId] - Update a rule
 // DELETE /api/rules/[ruleId] - Delete a rule
 export async function GET(
@@ -16,16 +16,19 @@ export async function GET(
   }
 
   const { ruleId } = await params;
-  const rule = await prisma.rule.findUnique({
-    where: { id: ruleId },
-    include: { executions: { orderBy: { startedAt: 'desc' }, take: 10 } },
-  });
+  const user = await storage.getUserByEmail(session.user.email);
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
 
-  if (!rule) {
+  const rule = await storage.getRule(ruleId);
+  if (!rule || rule.userId !== user.id) {
     return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ rule });
+  const executions = await storage.listExecutions(user.id, { ruleId, limit: 10 });
+
+  return NextResponse.json({ rule, executions });
 }
 
 export async function PUT(
@@ -38,19 +41,26 @@ export async function PUT(
   }
 
   const { ruleId } = await params;
+  const user = await storage.getUserByEmail(session.user.email);
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  const existing = await storage.getRule(ruleId);
+  if (!existing || existing.userId !== user.id) {
+    return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
+  }
+
   const body = await req.json();
   const { name, trigger, condition, action, schedule, enabled } = body;
 
-  const rule = await prisma.rule.update({
-    where: { id: ruleId },
-    data: {
-      ...(name !== undefined && { name }),
-      ...(trigger !== undefined && { trigger }),
-      ...(condition !== undefined && { condition: typeof condition === 'string' ? condition : JSON.stringify(condition) }),
-      ...(action !== undefined && { action: typeof action === 'string' ? action : JSON.stringify(action) }),
-      ...(schedule !== undefined && { schedule }),
-      ...(enabled !== undefined && { enabled }),
-    },
+  const rule = await storage.updateRule(ruleId, {
+    ...(name !== undefined && { name }),
+    ...(trigger !== undefined && { trigger }),
+    ...(condition !== undefined && { condition: typeof condition === 'string' ? condition : JSON.stringify(condition) }),
+    ...(action !== undefined && { action: typeof action === 'string' ? action : JSON.stringify(action) }),
+    ...(schedule !== undefined && { schedule }),
+    ...(enabled !== undefined && { enabled }),
   });
 
   return NextResponse.json({ rule });
@@ -66,6 +76,16 @@ export async function DELETE(
   }
 
   const { ruleId } = await params;
-  await prisma.rule.delete({ where: { id: ruleId } });
+  const user = await storage.getUserByEmail(session.user.email);
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  const existing = await storage.getRule(ruleId);
+  if (!existing || existing.userId !== user.id) {
+    return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
+  }
+
+  await storage.deleteRule(ruleId);
   return NextResponse.json({ success: true });
 }

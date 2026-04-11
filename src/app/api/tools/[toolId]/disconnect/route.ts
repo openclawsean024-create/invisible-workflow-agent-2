@@ -3,27 +3,22 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { storage } from '@/lib/storage';
 
-// POST /api/rules/[ruleId]/toggle - Toggle rule enabled/disabled
+// POST /api/tools/[toolId]/disconnect - Disconnect tool
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ ruleId: string }> }
+  { params }: { params: Promise<{ toolId: string }> }
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { ruleId } = await params;
+  const { toolId } = await params;
   const user = await storage.getUserByEmail(session.user.email);
   if (!user) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  const rule = await storage.getRule(ruleId);
-  if (!rule || rule.userId !== user.id) {
-    return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
-  }
-
-  const updated = await storage.updateRule(ruleId, { enabled: !rule.enabled });
-  return NextResponse.json({ rule: updated });
+  await storage.deleteToolConnection(user.id, toolId);
+  return NextResponse.json({ success: true });
 }

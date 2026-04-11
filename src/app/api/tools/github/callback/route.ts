@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { prisma } from '@/lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { storage } from '@/lib/storage';
 
 // OAuth callback for GitHub
 export async function GET(req: NextRequest) {
@@ -18,16 +18,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL(`/?error=github_${error ?? 'no_code'}`, req.url));
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://invisible-workflow.vercel.app';
 
   try {
-    // Exchange code for access token
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         client_id: process.env.GITHUB_CLIENT_ID,
         client_secret: process.env.GITHUB_CLIENT_SECRET,
@@ -37,39 +33,23 @@ export async function GET(req: NextRequest) {
     });
 
     const data = await tokenRes.json();
-    if (data.error) {
-      throw new Error(data.error_description ?? data.error);
-    }
+    if (data.error) throw new Error(data.error_description ?? data.error);
 
-    // Get GitHub user info
     const userRes = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${data.access_token}`,
-        Accept: 'application/vnd.github+json',
-      },
+      headers: { Authorization: `Bearer ${data.access_token}`, Accept: 'application/vnd.github+json' },
     });
     const userInfo = await userRes.json();
 
-    await prisma.toolConnection.upsert({
-      where: {
-        userId_toolId: { userId: session.user.id ?? '', toolId: 'github' },
-      },
-      create: {
-        userId: session.user.id ?? '',
-        toolId: 'github',
-        accessToken: data.access_token,
-        accountId: String(userInfo.id),
-        accountName: userInfo.login ?? 'GitHub User',
-        connected: true,
-        connectedAt: new Date(),
-      },
-      update: {
-        accessToken: data.access_token,
-        accountId: String(userInfo.id),
-        accountName: userInfo.login ?? 'GitHub User',
-        connected: true,
-        connectedAt: new Date(),
-      },
+    const userId = (session.user as { id?: string }).id ?? session.user.email;
+    const now = new Date().toISOString();
+
+    await storage.upsertToolConnection(userId, 'github', {
+      accessToken: data.access_token,
+      accountId: String(userInfo.id),
+      accountName: userInfo.login ?? 'GitHub User',
+      connected: true,
+      connectedAt: now,
+      lastSyncAt: now,
     });
 
     return NextResponse.redirect(new URL('/?connected=github', req.url));

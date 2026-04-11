@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { prisma } from '@/lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { storage } from '@/lib/storage';
 import { executeRule } from '@/lib/workflow-executor';
 
 // POST /api/execute - Execute a rule by ID
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+  const user = await storage.getUserByEmail(session.user.email);
   if (!user) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
@@ -24,24 +24,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'ruleId is required' }, { status: 400 });
   }
 
-  const rule = await prisma.rule.findUnique({ where: { id: ruleId } });
-  if (!rule) {
+  const rule = await storage.getRule(ruleId);
+  if (!rule || rule.userId !== user.id) {
     return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
   }
-  if (rule.userId !== user.id) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
 
-  // Create execution record
-  const execution = await prisma.execution.create({
-    data: {
-      ruleId,
-      userId: user.id,
-      status: 'running',
-    },
+  const execution = await storage.createExecution({
+    ruleId,
+    userId: user.id,
+    status: 'running',
+    startedAt: new Date().toISOString(),
   });
 
-  // Execute rule (via Temporal or direct fallback)
   try {
     const result = await executeRule(ruleId, execution.id, triggerEvent);
     return NextResponse.json({
@@ -50,9 +44,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Execution failed';
-    await prisma.execution.update({
-      where: { id: execution.id },
-      data: { status: 'failed', details: message, completedAt: new Date() },
+    await storage.updateExecution(execution.id, {
+      status: 'failed',
+      details: message,
+      completedAt: new Date().toISOString(),
     });
     return NextResponse.json({ execution, error: message }, { status: 500 });
   }

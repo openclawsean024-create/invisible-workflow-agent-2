@@ -1,8 +1,9 @@
-// Workflow Executor — direct execution backend for Vercel
-// Temporal workflow definitions remain in src/workflows/, but runtime execution
-// uses direct API calls so the backend works in serverless deployment.
+/**
+ * Workflow Executor — serverless-compatible execution backend.
+ * Uses JSON file storage instead of Prisma for Vercel compatibility.
+ */
 
-import { prisma } from './prisma';
+import { storage } from './storage';
 import {
   recordExecution,
   findDueRules,
@@ -20,24 +21,15 @@ export interface ActionResult {
   details?: Record<string, unknown>;
 }
 
-export interface AutomationInput {
-  ruleId: string;
-  executionId: string;
-  triggerEvent?: Record<string, unknown>;
-}
-
 export async function executeRule(
   ruleId: string,
   executionId: string,
   triggerEvent?: Record<string, unknown>
 ): Promise<ActionResult> {
-  await prisma.execution.update({
-    where: { id: executionId },
-    data: { status: 'running' },
-  });
+  await storage.updateExecution(executionId, { status: 'running' });
 
   try {
-    const rule = await prisma.rule.findUnique({ where: { id: ruleId } });
+    const rule = await storage.getRule(ruleId);
     if (!rule) throw new Error(`Rule ${ruleId} not found`);
 
     const condition = parseJson(rule.condition);
@@ -49,27 +41,18 @@ export async function executeRule(
         executionId,
         status: 'success',
         details: `Condition not met: ${conditionPassed.reason}`,
-        completedAt: new Date(),
+        completedAt: new Date().toISOString(),
       });
       return { success: true, message: `Condition not met: ${conditionPassed.reason}` };
     }
 
-    const actionResult = await executeAction(rule.userId, action, triggerEvent);
+    const actionResult = await executeToolAction(rule.userId, action, triggerEvent);
 
     await recordExecution({
       executionId,
       status: actionResult.success ? 'success' : 'failed',
       details: actionResult.message,
-      completedAt: new Date(),
-    });
-
-    await prisma.rule.update({
-      where: { id: ruleId },
-      data: {
-        lastRunAt: new Date(),
-        runCount: { increment: 1 },
-        ...(actionResult.success && { successCount: { increment: 1 } }),
-      },
+      completedAt: new Date().toISOString(),
     });
 
     return actionResult;
@@ -79,7 +62,7 @@ export async function executeRule(
       executionId,
       status: 'failed',
       details: message,
-      completedAt: new Date(),
+      completedAt: new Date().toISOString(),
     });
     return { success: false, message };
   }
@@ -113,53 +96,65 @@ function evaluateCondition(
   return { passed: true };
 }
 
-async function executeAction(
+async function executeToolAction(
   userId: string,
   action: Record<string, unknown>,
   triggerEvent?: Record<string, unknown>
 ): Promise<ActionResult> {
-  const actionType = String(action.type ?? '');
   const tool = String(action.tool ?? '');
+  const actionType = String(action.type ?? '');
   const params = (action.params ?? triggerEvent ?? {}) as Record<string, string>;
 
-  switch (tool) {
-    case 'gmail':
-    case 'email':
-      return wrap(await executeGmailAction({ userId, action: (actionType || 'send_email') as 'send_email' | 'search_emails', params }));
-    case 'slack':
-      return wrap(await executeSlackAction({ userId, action: (actionType || 'send_message') as 'send_message' | 'create_channel', params }));
-    case 'notion':
-      return wrap(await executeNotionAction({ userId, action: (actionType || 'create_page') as 'create_page' | 'update_page' | 'query_database', params }));
-    case 'trello':
-      return wrap(await executeTrelloAction({ userId, action: (actionType || 'create_card') as 'create_card' | 'move_card' | 'add_comment', params }));
-    case 'github':
-      return wrap(await executeGitHubAction({ userId, action: (actionType || 'create_issue') as 'create_issue' | 'create_pr' | 'add_comment', params }));
-    case 'google-calendar':
-    case 'calendar':
-      return wrap(await executeCalendarAction({ userId, action: (actionType || 'create_event') as 'create_event' | 'get_events', params }));
-    default:
-      return { success: false, message: `Unknown tool: ${tool}` };
+  try {
+    let result: Record<string, unknown>;
+    switch (tool) {
+      case 'gmail':
+      case 'email':
+        result = await executeGmailAction({ userId, action: (actionType || 'send_email') as 'send_email' | 'search_emails', params });
+        break;
+      case 'slack':
+        result = await executeSlackAction({ userId, action: (actionType || 'send_message') as 'send_message' | 'create_channel', params });
+        break;
+      case 'notion':
+        result = await executeNotionAction({ userId, action: (actionType || 'create_page') as 'create_page' | 'update_page' | 'query_database', params });
+        break;
+      case 'trello':
+        result = await executeTrelloAction({ userId, action: (actionType || 'create_card') as 'create_card' | 'move_card' | 'add_comment', params });
+        break;
+      case 'github':
+        result = await executeGitHubAction({ userId, action: (actionType || 'create_issue') as 'create_issue' | 'create_pr' | 'add_comment', params });
+        break;
+      case 'google-calendar':
+      case 'calendar':
+        result = await executeCalendarAction({ userId, action: (actionType || 'create_event') as 'create_event' | 'get_events', params });
+        break;
+      default:
+        return { success: false, message: `Unknown tool: ${tool}` };
+    }
+    return { success: true, message: 'Action executed', details: result };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, message };
   }
 }
 
-function wrap(result: Record<string, unknown>): ActionResult {
-  return { success: true, message: 'Action executed', details: result };
-}
-
 export async function executeScheduledRules(): Promise<{ executed: number; results: string[] }> {
-  const rules = await findDueRules();
+  const dueRules = await findDueRules();
   const results: string[] = [];
 
-  for (const rule of rules) {
-    const fullRule = await prisma.rule.findUnique({ where: { id: rule.id }, select: { userId: true } });
+  for (const rule of dueRules) {
+    const fullRule = await storage.getRule(rule.id);
     if (!fullRule) continue;
 
-    const execution = await prisma.execution.create({
-      data: { ruleId: rule.id, userId: fullRule.userId, status: 'running' },
+    const execution = await storage.createExecution({
+      ruleId: rule.id,
+      userId: fullRule.userId,
+      status: 'running',
+      startedAt: new Date().toISOString(),
     });
     const result = await executeRule(rule.id, execution.id);
     results.push(`[${rule.name}] ${result.message}`);
   }
 
-  return { executed: rules.length, results };
+  return { executed: dueRules.length, results };
 }

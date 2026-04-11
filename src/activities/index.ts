@@ -1,62 +1,53 @@
-// Temporal Activities — tool-specific action executors
+/**
+ * Activities — tool-specific action executors using JSON file storage.
+ * Serverless-compatible (no Prisma dependency).
+ */
 
-import { prisma } from '@/lib/prisma';
+import { storage } from '@/lib/storage';
 
 export interface RecordExecutionInput {
   executionId: string;
   status: 'success' | 'failed' | 'running';
   details?: string;
-  completedAt?: Date;
+  completedAt?: string;
 }
 
-/** Record execution result to database */
 export async function recordExecution(input: RecordExecutionInput): Promise<void> {
   const { executionId, status, details, completedAt } = input;
-  await prisma.execution.update({
-    where: { id: executionId },
-    data: {
-      status,
-      details: details ?? null,
-      completedAt: completedAt ?? new Date(),
-    },
+  await storage.updateExecution(executionId, {
+    status,
+    details: details ?? undefined,
+    completedAt: completedAt ?? new Date().toISOString(),
   });
 
-  // Update rule stats
-  const execution = await prisma.execution.findUnique({
-    where: { id: executionId },
-    select: { ruleId: true, status: true },
-  });
-
+  const execution = await storage.getExecution(executionId);
   if (execution) {
-    const updates: Record<string, unknown> = { lastRunAt: new Date() };
-    if (execution.status === 'success') {
-      updates.successCount = { increment: 1 };
+    const rule = await storage.getRule(execution.ruleId);
+    if (rule) {
+      await storage.updateRule(execution.ruleId, {
+        lastRunAt: new Date().toISOString(),
+        runCount: rule.runCount + 1,
+        ...(status === 'success' && { successCount: rule.successCount + 1 }),
+      });
     }
-    updates.runCount = { increment: 1 };
-    await prisma.rule.update({
-      where: { id: execution.ruleId },
-      data: updates,
-    });
   }
 }
 
-/** Find all rules due for scheduled execution */
 export async function findDueRules(): Promise<Array<{ id: string; name: string; trigger: string }>> {
-  // In production, this would use a cron schedule query
-  // For now, return scheduled rules that are enabled
-  const rules = await prisma.rule.findMany({
-    where: {
-      enabled: true,
-      trigger: 'scheduled',
-      OR: [
-        { lastRunAt: null },
-        { lastRunAt: { lt: new Date(Date.now() - 60000) } }, // Due if not run in last minute
-      ],
-    },
-    select: { id: true, name: true, trigger: true },
-    take: 10,
-  });
-  return rules;
+  const rules = await storage.listRules();
+  return rules
+    .filter(r => {
+      if (!r.enabled || r.trigger !== 'scheduled') return false;
+      if (!r.lastRunAt) return true;
+      // Due if not run in last minute (demo mode)
+      return new Date(r.lastRunAt).getTime() < Date.now() - 60000;
+    })
+    .slice(0, 10)
+    .map(r => ({ id: r.id, name: r.name, trigger: r.trigger }));
+}
+
+export async function getToolConnection(userId: string, toolId: string) {
+  return storage.getToolConnection(userId, toolId);
 }
 
 export interface ExecuteGmailInput {
@@ -66,10 +57,7 @@ export interface ExecuteGmailInput {
 }
 
 export async function executeGmailAction(input: ExecuteGmailInput): Promise<Record<string, unknown>> {
-  const connection = await prisma.toolConnection.findUnique({
-    where: { userId_toolId: { userId: input.userId, toolId: 'gmail' } },
-  });
-
+  const connection = await storage.getToolConnection(input.userId, 'gmail');
   if (!connection?.connected || !connection.accessToken) {
     throw new Error('Gmail not connected');
   }
@@ -100,10 +88,7 @@ export interface ExecuteSlackInput {
 }
 
 export async function executeSlackAction(input: ExecuteSlackInput): Promise<Record<string, unknown>> {
-  const connection = await prisma.toolConnection.findUnique({
-    where: { userId_toolId: { userId: input.userId, toolId: 'slack' } },
-  });
-
+  const connection = await storage.getToolConnection(input.userId, 'slack');
   if (!connection?.connected || !connection.accessToken) {
     throw new Error('Slack not connected');
   }
@@ -115,10 +100,7 @@ export async function executeSlackAction(input: ExecuteSlackInput): Promise<Reco
         Authorization: `Bearer ${connection.accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        channel: input.params.channel,
-        text: input.params.text,
-      }),
+      body: JSON.stringify({ channel: input.params.channel, text: input.params.text }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
@@ -135,10 +117,7 @@ export interface ExecuteNotionInput {
 }
 
 export async function executeNotionAction(input: ExecuteNotionInput): Promise<Record<string, unknown>> {
-  const connection = await prisma.toolConnection.findUnique({
-    where: { userId_toolId: { userId: input.userId, toolId: 'notion' } },
-  });
-
+  const connection = await storage.getToolConnection(input.userId, 'notion');
   if (!connection?.connected || !connection.accessToken) {
     throw new Error('Notion not connected');
   }
@@ -153,9 +132,7 @@ export async function executeNotionAction(input: ExecuteNotionInput): Promise<Re
       },
       body: JSON.stringify({
         parent: { page_id: input.params.parent_page_id },
-        properties: {
-          title: { title: [{ text: { content: input.params.title } }] },
-        },
+        properties: { title: { title: [{ text: { content: input.params.title } }] } },
         children: input.params.children ? JSON.parse(input.params.children) : [],
       }),
     });
@@ -174,10 +151,7 @@ export interface ExecuteTrelloInput {
 }
 
 export async function executeTrelloAction(input: ExecuteTrelloInput): Promise<Record<string, unknown>> {
-  const connection = await prisma.toolConnection.findUnique({
-    where: { userId_toolId: { userId: input.userId, toolId: 'trello' } },
-  });
-
+  const connection = await storage.getToolConnection(input.userId, 'trello');
   if (!connection?.connected || !connection.accessToken) {
     throw new Error('Trello not connected');
   }
@@ -214,10 +188,7 @@ export interface ExecuteGitHubInput {
 }
 
 export async function executeGitHubAction(input: ExecuteGitHubInput): Promise<Record<string, unknown>> {
-  const connection = await prisma.toolConnection.findUnique({
-    where: { userId_toolId: { userId: input.userId, toolId: 'github' } },
-  });
-
+  const connection = await storage.getToolConnection(input.userId, 'github');
   if (!connection?.connected || !connection.accessToken) {
     throw new Error('GitHub not connected');
   }
@@ -251,10 +222,7 @@ export interface ExecuteCalendarInput {
 }
 
 export async function executeCalendarAction(input: ExecuteCalendarInput): Promise<Record<string, unknown>> {
-  const connection = await prisma.toolConnection.findUnique({
-    where: { userId_toolId: { userId: input.userId, toolId: 'google-calendar' } },
-  });
-
+  const connection = await storage.getToolConnection(input.userId, 'google-calendar');
   if (!connection?.connected || !connection.accessToken) {
     throw new Error('Google Calendar not connected');
   }
@@ -272,7 +240,7 @@ export async function executeCalendarAction(input: ExecuteCalendarInput): Promis
         start: { dateTime: input.params.start_time, timeZone: 'Asia/Taipei' },
         end: { dateTime: input.params.end_time, timeZone: 'Asia/Taipei' },
         attendees: input.params.attendees
-          ? input.params.attendees.split(',').map((e) => ({ email: e.trim() }))
+          ? input.params.attendees.split(',').map(e => ({ email: e.trim() }))
           : [],
       }),
     });

@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { executeScheduledRules } from '@/lib/workflow-executor';
 
 // GET /api/cron/scheduled - Cron endpoint for scheduled rule execution
-// This endpoint should be called by Vercel Cron (or external cron service)
-// Vercel cron: configure in vercel.json with route "/api/cron/scheduled"
+// Configured in vercel.json with route "/api/cron/scheduled"
 export async function GET() {
   try {
     const result = await executeScheduledRules();

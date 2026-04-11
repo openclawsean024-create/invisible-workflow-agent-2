@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { prisma } from '@/lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { storage } from '@/lib/storage';
 
 // OAuth callback for Google Calendar
 export async function GET(req: NextRequest) {
@@ -18,10 +18,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL(`/?error=oauth_${error ?? 'no_code'}`, req.url));
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://invisible-workflow.vercel.app';
 
   try {
-    // Exchange code for tokens
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -34,68 +33,40 @@ export async function GET(req: NextRequest) {
       }),
     });
 
-    if (!tokenRes.ok) {
-      throw new Error('Token exchange failed');
-    }
-
+    if (!tokenRes.ok) throw new Error('Token exchange failed');
     const tokens = await tokenRes.json();
 
-    // Get user info
     const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
     const userInfo = await userInfoRes.json();
 
-    // Save/update connection
-    await prisma.toolConnection.upsert({
-      where: {
-        userId_toolId: { userId: session.user.id ?? '', toolId: 'google-calendar' },
-      },
-      create: {
-        userId: session.user.id ?? '',
-        toolId: 'google-calendar',
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-        accountId: userInfo.id,
-        accountName: userInfo.email,
-        connected: true,
-        connectedAt: new Date(),
-      },
-      update: {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? undefined,
-        expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-        accountId: userInfo.id,
-        accountName: userInfo.email,
-        connected: true,
-        connectedAt: new Date(),
-      },
+    const expiresAt = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : undefined;
+    const now = new Date().toISOString();
+    const userId = (session.user as { id?: string }).id ?? session.user.email;
+
+    // Save Google Calendar connection
+    await storage.upsertToolConnection(userId, 'google-calendar', {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt,
+      accountId: userInfo.id,
+      accountName: userInfo.email,
+      connected: true,
+      connectedAt: now,
+      lastSyncAt: now,
     });
 
     // Also save Gmail connection with same tokens
-    await prisma.toolConnection.upsert({
-      where: {
-        userId_toolId: { userId: session.user.id ?? '', toolId: 'gmail' },
-      },
-      create: {
-        userId: session.user.id ?? '',
-        toolId: 'gmail',
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-        accountId: userInfo.id,
-        accountName: userInfo.email,
-        connected: true,
-        connectedAt: new Date(),
-      },
-      update: {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? undefined,
-        expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-        connected: true,
-        connectedAt: new Date(),
-      },
+    await storage.upsertToolConnection(userId, 'gmail', {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt,
+      accountId: userInfo.id,
+      accountName: userInfo.email,
+      connected: true,
+      connectedAt: now,
+      lastSyncAt: now,
     });
 
     return NextResponse.redirect(new URL('/?connected=google-calendar', req.url));

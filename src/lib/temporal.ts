@@ -2,7 +2,6 @@
 // Uses Temporal Cloud when TEMPORAL_HOST_URL is configured, otherwise falls back to direct execution
 
 import { Connection, WorkflowClient } from '@temporalio/client';
-import type { AutomationConfig } from '@/workflows/automation';
 
 export interface TemporalConfig {
   enabled: boolean;
