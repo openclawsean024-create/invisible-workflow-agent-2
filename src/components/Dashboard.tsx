@@ -18,14 +18,22 @@ interface DashboardStats {
 
 export default function Dashboard() {
   const { lang } = useApp();
-  const [logs, setLogs] = useState(SAMPLE_LOGS);
+  const [logs, setLogs] = useState<typeof SAMPLE_LOGS>(SAMPLE_LOGS);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [rules, setRules] = useState<Array<{ id: string; name: string; trigger: string; enabled: boolean; runCount: number; successCount: number }>>([]);
 
   useEffect(() => {
     fetch('/api/dashboard/stats')
       .then((r) => r.ok ? r.json() : null)
       .then((d) => d && setStats(d))
       .catch(() => {})
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/rules')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.rules) setRules(d.rules); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -52,10 +60,10 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [lang]);
 
-  const activeRules = stats?.activeRules ?? 2;
+  const activeRules = stats?.activeRules ?? 0;
   const connectedTools = stats?.connectedTools ?? 0;
-  const successRate = stats?.successRate ?? 95;
-  const savedMinutes = stats?.estimatedMinutesSaved ?? 180;
+  const successRate = stats?.successRate ?? 0;
+  const savedMinutes = stats?.estimatedMinutesSaved ?? 0;
 
   const formatSaved = (mins: number) => {
     if (mins >= 60) return `${Math.floor(mins / 60)}h`;
@@ -127,16 +135,21 @@ export default function Dashboard() {
             {lang === 'zh' ? '規則概覽' : 'Rules Overview'}
           </h3>
           <div className="space-y-3">
-            {TOOLS.slice(0, 3).map((tool) => (
-              <div key={tool.id} className="flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${stats ? 'bg-green-400' : 'bg-gray-600'}`} />
-                  <span className="text-sm text-gray-300 truncate">
-                    {stats ? `${activeRules} ${lang === 'zh' ? '條活躍規則' : 'active rules'}` : '—'}
-                  </span>
+            {rules.slice(0, 5).map((rule) => {
+              const sr = rule.runCount > 0 ? Math.round((rule.successCount / rule.runCount) * 100) : 0;
+              return (
+                <div key={rule.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${rule.enabled ? 'bg-green-400' : 'bg-gray-600'}`} />
+                    <span className="text-sm text-gray-300 truncate">{rule.name}</span>
+                  </div>
+                  <span className="text-xs text-gray-500">{rule.runCount} {lang === 'zh' ? '次' : 'runs'} · {sr}% {lang === 'zh' ? '成功' : 'ok'}</span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
+            {rules.length === 0 && (
+              <div className="text-xs text-gray-500">{lang === 'zh' ? '尚無規則' : 'No rules yet'}</div>
+            )}
           </div>
         </div>
 

@@ -23,43 +23,20 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
   const [parsed, setParsed] = useState<ParsedRule | null>(null);
   const [error, setError] = useState('');
 
-  const handleParse = async () => {
+  // Step 1 → confirm: just parse/validate, don't create yet
+  const handleConfirm = () => {
     if (!naturalRule.trim()) return;
-    setLoading(true);
-    setError('');
-
-    try {
-      const res = await fetch('/api/rules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: naturalRule.slice(0, 50),
-          trigger: 'scheduled',
-          condition: JSON.stringify({ text: naturalRule }),
-          action: JSON.stringify({ text: naturalRule }),
-          schedule: '0 9 * * *',
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setParsed({
-          trigger: 'scheduled',
-          condition: naturalRule,
-          action: naturalRule,
-          name: naturalRule.slice(0, 50),
-        });
-        setStep(2);
-      } else {
-        setError(lang === 'zh' ? '建立規則失敗，請重試' : 'Failed to create rule, please retry');
-      }
-    } catch {
-      setError(lang === 'zh' ? '網路錯誤' : 'Network error');
-    }
-    setLoading(false);
+    setParsed({
+      trigger: 'scheduled',
+      condition: naturalRule,
+      action: naturalRule,
+      name: naturalRule.slice(0, 50),
+    });
+    setStep(2);
   };
 
-  const handleCreate = async () => {
+  // Step 2 → save: actually POST to /api/rules
+  const handleSave = async () => {
     if (!parsed) return;
     setLoading(true);
     try {
@@ -73,7 +50,6 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
           action: JSON.stringify({ text: parsed.action }),
         }),
       });
-
       if (!res.ok) {
         setError(lang === 'zh' ? '建立規則失敗' : 'Failed to create rule');
         setLoading(false);
@@ -169,21 +145,12 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
               </div>
 
               <button
-                onClick={handleParse}
+                onClick={handleConfirm}
                 disabled={!naturalRule.trim() || loading}
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
               >
-                {loading ? (
-                  <>
-                    <span className="animate-spin">⟳</span>
-                    {lang === 'zh' ? '建立規則中...' : 'Creating rule...'}
-                  </>
-                ) : (
-                  <>
-                    <span>⚡</span>
-                    {lang === 'zh' ? '建立規則' : 'Create Rule'}
-                  </>
-                )}
+                <span>⚡</span>
+                {lang === 'zh' ? '確認並建立規則' : 'Confirm & Create Rule'}
               </button>
             </>
           ) : (
@@ -213,7 +180,7 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
                   {lang === 'zh' ? '← 修改' : '← Edit'}
                 </button>
                 <button
-                  onClick={handleCreate}
+                  onClick={handleSave}
                   disabled={loading}
                   className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
                 >
@@ -222,7 +189,7 @@ export default function AddRuleModal({ onClose }: AddRuleModalProps) {
                   ) : (
                     <>
                       <span>✓</span>
-                      {lang === 'zh' ? '建立規則' : 'Create Rule'}
+                      {lang === 'zh' ? '儲存規則' : 'Save Rule'}
                     </>
                   )}
                 </button>
