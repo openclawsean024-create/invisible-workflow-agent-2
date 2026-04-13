@@ -79,5 +79,5 @@ export const authOptions: NextAuthOptions = {
     signIn: '/',
     error: '/',
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: process.env.NEXTAUTH_SECRET || 'demo-fallback-secret-for-mvp-no-real-auth-required',
 };
